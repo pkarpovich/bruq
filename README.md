@@ -2,6 +2,8 @@
 
 Convert [Bruno](https://www.usebruno.com/) `.bru` files to curl commands.
 
+Perfect for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and other AI coding assistants - keep your API requests in Bruno as the single source of truth, and let your AI execute them via curl.
+
 ## Installation
 
 ### Homebrew (macOS)
@@ -76,6 +78,21 @@ Outputs:
 ```bash
 curl -X POST 'https://api.example.com/users' -H 'Content-Type: application/json' -d '{"name": "John"}'
 ```
+
+## Use with Claude Code
+
+Instead of manually crafting curl commands or having Claude guess API structures, point it to your Bruno collection:
+
+```
+Run the "Create User" request from my Bruno collection at ./api/users.bru with Local environment
+```
+
+Claude Code can then:
+```bash
+eval "$(bruq ./api/users.bru -e Local)"
+```
+
+This keeps Bruno as your single source of truth for API requests while letting AI assistants execute them reliably.
 
 ## License
 
