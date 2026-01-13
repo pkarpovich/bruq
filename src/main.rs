@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use clap::Parser;
 
 use crate::parser::parse_bru_file;
-use crate::environment::{load_environment, substitute_variables};
+use crate::environment::{load_environment, apply_environment};
 use crate::curl::{generate_curl, CurlOptions};
 
 #[derive(Parser)]
@@ -44,15 +44,7 @@ fn run() -> Result<(), String> {
 
     if let Some(env_name) = &cli.env {
         let env = load_environment(&cli.file, env_name)?;
-        bru.request.url = substitute_variables(&bru.request.url, &env.vars);
-
-        if let Some(ref mut body) = bru.body {
-            body.content = substitute_variables(&body.content, &env.vars);
-        }
-
-        for value in bru.headers.values_mut() {
-            *value = substitute_variables(value, &env.vars);
-        }
+        apply_environment(&mut bru, &env);
     }
 
     let options = CurlOptions {
@@ -60,8 +52,7 @@ fn run() -> Result<(), String> {
         silent: cli.silent,
     };
 
-    let curl_cmd = generate_curl(&bru, &options);
-    println!("{}", curl_cmd);
+    println!("{}", generate_curl(&bru, &options));
 
     Ok(())
 }

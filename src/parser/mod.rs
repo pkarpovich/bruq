@@ -3,6 +3,8 @@ pub mod ast;
 use std::collections::HashMap;
 use ast::{BruFile, Request, Body, Method, Environment};
 
+type CharIter<'a> = std::iter::Peekable<std::str::Chars<'a>>;
+
 pub fn parse_bru_file(content: &str) -> Result<BruFile, String> {
     let mut request: Option<Request> = None;
     let mut body: Option<Body> = None;
@@ -21,21 +23,19 @@ pub fn parse_bru_file(content: &str) -> Result<BruFile, String> {
 
         skip_whitespace_no_newline(&mut chars);
 
-        if block_name == "body" {
-            if chars.peek() == Some(&':') {
+        if block_name == "body" && chars.peek() == Some(&':') {
+            chars.next();
+            let body_type = read_identifier(&mut chars);
+            skip_whitespace(&mut chars);
+            if chars.peek() == Some(&'{') {
                 chars.next();
-                let body_type = read_identifier(&mut chars);
-                skip_whitespace(&mut chars);
-                if chars.peek() == Some(&'{') {
-                    chars.next();
-                    let content_str = read_balanced_braces(&mut chars);
-                    body = Some(Body {
-                        body_type,
-                        content: content_str.trim().to_string(),
-                    });
-                }
-                continue;
+                let content_str = read_balanced_braces(&mut chars);
+                body = Some(Body {
+                    body_type,
+                    content: content_str.trim().to_string(),
+                });
             }
+            continue;
         }
 
         if chars.peek() != Some(&'{') {
@@ -49,19 +49,13 @@ pub fn parse_bru_file(content: &str) -> Result<BruFile, String> {
                 request = Some(parse_method_block(&block_name, &mut chars)?);
             }
             "headers" => headers = parse_key_value_block(&mut chars),
-            _ => {
-                skip_block(&mut chars);
-            }
+            _ => skip_block(&mut chars),
         }
     }
 
     let request = request.ok_or("No request method block found")?;
 
-    Ok(BruFile {
-        request,
-        body,
-        headers,
-    })
+    Ok(BruFile { request, body, headers })
 }
 
 pub fn parse_environment(content: &str) -> Result<Environment, String> {
@@ -85,31 +79,24 @@ pub fn parse_environment(content: &str) -> Result<Environment, String> {
         }
         chars.next();
 
-        if block_name == "vars" {
-            vars = parse_key_value_block(&mut chars);
-        } else {
+        if block_name != "vars" {
             skip_block(&mut chars);
+            continue;
         }
+        vars = parse_key_value_block(&mut chars);
     }
 
     Ok(Environment { vars })
 }
 
-fn parse_method_block(
-    method_str: &str,
-    chars: &mut std::iter::Peekable<std::str::Chars>,
-) -> Result<Request, String> {
+fn parse_method_block(method_str: &str, chars: &mut CharIter) -> Result<Request, String> {
     let entries = parse_key_value_block(chars);
-
     let method: Method = method_str.parse()?;
     let url = entries.get("url").cloned().unwrap_or_default();
-
     Ok(Request { method, url })
 }
 
-fn parse_key_value_block(
-    chars: &mut std::iter::Peekable<std::str::Chars>,
-) -> HashMap<String, String> {
+fn parse_key_value_block(chars: &mut CharIter) -> HashMap<String, String> {
     let mut result = HashMap::new();
 
     loop {
@@ -143,89 +130,75 @@ fn parse_key_value_block(
     result
 }
 
-fn read_balanced_braces(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
+fn read_balanced_braces(chars: &mut CharIter) -> String {
     let mut result = String::new();
     let mut depth = 1;
 
-    while let Some(&c) = chars.peek() {
-        if c == '{' {
-            depth += 1;
-            result.push(c);
-            chars.next();
-        } else if c == '}' {
-            depth -= 1;
-            if depth == 0 {
-                chars.next();
-                break;
+    while let Some(c) = chars.next() {
+        match c {
+            '{' => {
+                depth += 1;
+                result.push(c);
             }
-            result.push(c);
-            chars.next();
-        } else {
-            result.push(c);
-            chars.next();
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+                result.push(c);
+            }
+            _ => result.push(c),
         }
     }
 
     result
 }
 
-fn skip_block(chars: &mut std::iter::Peekable<std::str::Chars>) {
+fn skip_block(chars: &mut CharIter) {
     let mut depth = 1;
     while let Some(c) = chars.next() {
-        if c == '{' {
-            depth += 1;
-        } else if c == '}' {
-            depth -= 1;
-            if depth == 0 {
-                break;
-            }
+        match c {
+            '{' => depth += 1,
+            '}' if depth == 1 => break,
+            '}' => depth -= 1,
+            _ => {}
         }
     }
 }
 
-fn skip_whitespace(chars: &mut std::iter::Peekable<std::str::Chars>) {
-    while let Some(&c) = chars.peek() {
-        if c.is_whitespace() {
-            chars.next();
-        } else {
-            break;
-        }
-    }
-}
-
-fn skip_whitespace_no_newline(chars: &mut std::iter::Peekable<std::str::Chars>) {
-    while let Some(&c) = chars.peek() {
-        if c == ' ' || c == '\t' {
-            chars.next();
-        } else {
-            break;
-        }
-    }
-}
-
-fn skip_line(chars: &mut std::iter::Peekable<std::str::Chars>) {
-    while let Some(&c) = chars.peek() {
+fn skip_whitespace(chars: &mut CharIter) {
+    while chars.peek().is_some_and(|c| c.is_whitespace()) {
         chars.next();
+    }
+}
+
+fn skip_whitespace_no_newline(chars: &mut CharIter) {
+    while chars.peek().is_some_and(|&c| c == ' ' || c == '\t') {
+        chars.next();
+    }
+}
+
+fn skip_line(chars: &mut CharIter) {
+    while let Some(c) = chars.next() {
         if c == '\n' {
             break;
         }
     }
 }
 
-fn read_identifier(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
+fn read_identifier(chars: &mut CharIter) -> String {
     let mut result = String::new();
     while let Some(&c) = chars.peek() {
-        if c.is_alphanumeric() || c == '_' || c == '-' {
-            result.push(c);
-            chars.next();
-        } else {
+        if !c.is_alphanumeric() && c != '_' && c != '-' {
             break;
         }
+        result.push(c);
+        chars.next();
     }
     result
 }
 
-fn read_until_colon(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
+fn read_until_colon(chars: &mut CharIter) -> String {
     let mut result = String::new();
     while let Some(&c) = chars.peek() {
         if c == ':' || c == '\n' || c == '}' {
@@ -237,15 +210,13 @@ fn read_until_colon(chars: &mut std::iter::Peekable<std::str::Chars>) -> String 
     result
 }
 
-fn read_line(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
+fn read_line(chars: &mut CharIter) -> String {
     let mut result = String::new();
-    while let Some(&c) = chars.peek() {
+    while let Some(c) = chars.next() {
         if c == '\n' {
-            chars.next();
             break;
         }
         result.push(c);
-        chars.next();
     }
     result
 }
