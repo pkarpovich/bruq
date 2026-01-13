@@ -220,3 +220,126 @@ fn read_line(chars: &mut CharIter) -> String {
     }
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_simple_get_request() {
+        let content = r#"
+get {
+  url: https://api.example.com/users
+}
+"#;
+        let bru = parse_bru_file(content).unwrap();
+        assert_eq!(bru.request.url, "https://api.example.com/users");
+        assert!(matches!(bru.request.method, Method::Get));
+        assert!(bru.body.is_none());
+    }
+
+    #[test]
+    fn parse_post_with_json_body() {
+        let content = r#"
+post {
+  url: https://api.example.com/users
+  body: json
+}
+
+body:json {
+  {
+    "name": "John",
+    "age": 30
+  }
+}
+"#;
+        let bru = parse_bru_file(content).unwrap();
+        assert_eq!(bru.request.url, "https://api.example.com/users");
+        assert!(matches!(bru.request.method, Method::Post));
+        assert!(bru.body.is_some());
+        let body = bru.body.unwrap();
+        assert_eq!(body.body_type, "json");
+        assert!(body.content.contains("\"name\": \"John\""));
+    }
+
+    #[test]
+    fn parse_request_with_headers() {
+        let content = r#"
+get {
+  url: https://api.example.com/users
+}
+
+headers {
+  Authorization: Bearer token123
+  X-Custom-Header: custom-value
+}
+"#;
+        let bru = parse_bru_file(content).unwrap();
+        assert_eq!(bru.headers.get("Authorization").unwrap(), "Bearer token123");
+        assert_eq!(bru.headers.get("X-Custom-Header").unwrap(), "custom-value");
+    }
+
+    #[test]
+    fn parse_environment_vars() {
+        let content = r#"
+vars {
+  API_URL: https://api.example.com
+  API_KEY: secret123
+}
+"#;
+        let env = parse_environment(content).unwrap();
+        assert_eq!(env.vars.get("API_URL").unwrap(), "https://api.example.com");
+        assert_eq!(env.vars.get("API_KEY").unwrap(), "secret123");
+    }
+
+    #[test]
+    fn parse_nested_json_body() {
+        let content = r#"
+post {
+  url: https://api.example.com
+}
+
+body:json {
+  {
+    "user": {
+      "name": "John",
+      "address": {
+        "city": "NYC"
+      }
+    }
+  }
+}
+"#;
+        let bru = parse_bru_file(content).unwrap();
+        let body = bru.body.unwrap();
+        assert!(body.content.contains("\"address\""));
+        assert!(body.content.contains("\"city\": \"NYC\""));
+    }
+
+    #[test]
+    fn parse_all_http_methods() {
+        for method in ["get", "post", "put", "delete", "patch", "options", "head"] {
+            let content = format!(
+                r#"
+{} {{
+  url: https://api.example.com
+}}
+"#,
+                method
+            );
+            let bru = parse_bru_file(&content).unwrap();
+            assert_eq!(bru.request.url, "https://api.example.com");
+        }
+    }
+
+    #[test]
+    fn error_on_missing_method_block() {
+        let content = r#"
+headers {
+  Authorization: Bearer token
+}
+"#;
+        let result = parse_bru_file(content);
+        assert!(result.is_err());
+    }
+}

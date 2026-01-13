@@ -9,3 +9,6 @@ run = "cargo run --"
 
 [tasks.check]
 run = "cargo check"
+
+[tasks.test]
+run = "cargo test"
